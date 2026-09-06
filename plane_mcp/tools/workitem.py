@@ -102,6 +102,13 @@ ACTIONS = (
     ),
     Action("create", ("project_id", "name"), WRITE_FIELDS[1:]),
     Action("update", ("project_id", "workitem_id"), WRITE_FIELDS, note="only the fields you pass are changed"),
+    Action(
+        "move",
+        ("project_id", "workitem_id", "target_project_id"),
+        note="moves the work item (and its sub-items) to another project in the same workspace; "
+        "state and labels are remapped by name, cycle/module links are dropped, and it gets a "
+        "new identifier. BlockWill self-host only",
+    ),
     Action("delete", ("project_id", "workitem_id"), destructive=True),
     Action(
         "archive",
@@ -177,6 +184,41 @@ def _scoped_pql(pql: str, project_id: str) -> str:
     return f"({pql}) AND {scope}" if pql else scope
 
 
+def _move_work_item(workspace_slug: str, project_id: str, workitem_id: str, target_project_id: str) -> dict | str:
+    """Call the BlockWill fork's cross-project move endpoint.
+
+    The endpoint is a fork addition (plane/api/views/move.py in
+    blockwill-io/plane), so it is not part of the Plane SDK — hence the raw
+    HTTP call with the same base URL and credentials the SDK client uses.
+    """
+    import os
+
+    import httpx
+    from fastmcp.server.dependencies import get_access_token
+
+    base_url = os.getenv("PLANE_INTERNAL_BASE_URL") or os.getenv("PLANE_BASE_URL", "https://api.plane.so")
+    headers = {"Content-Type": "application/json"}
+
+    stored = get_access_token()
+    if stored and stored.claims.get("auth_method") in ("api_key_env", "api_key_header"):
+        headers["x-api-key"] = stored.token
+    elif os.getenv("PLANE_API_KEY"):
+        headers["x-api-key"] = os.environ["PLANE_API_KEY"]
+    elif stored:
+        headers["Authorization"] = f"Bearer {stored.token}"
+    else:
+        return "Error: no Plane credentials available for the move call"
+
+    url = (
+        f"{base_url.rstrip('/')}/api/v1/workspaces/{workspace_slug}"
+        f"/projects/{project_id}/work-items/{workitem_id}/move/"
+    )
+    response = httpx.post(url, json={"target_project_id": target_project_id}, headers=headers, timeout=30)
+    if response.status_code >= 400:
+        return f"Error: move failed with HTTP {response.status_code}: {response.text[:300]}"
+    return response.json()
+
+
 def register(mcp: FastMCP) -> None:
     @mcp.tool(
         name=NAME,
@@ -193,6 +235,7 @@ def register(mcp: FastMCP) -> None:
             "count",
             "create",
             "update",
+            "move",
             "delete",
             "archive",
             "manage_assignee",
@@ -219,6 +262,7 @@ def register(mcp: FastMCP) -> None:
         parent: str = "",
         state: str = "",
         estimate_point: str = "",
+        target_project_id: str = "",
         add_user_id: str = "",
         remove_user_id: str = "",
         add_label_id: str = "",
@@ -362,6 +406,11 @@ def register(mcp: FastMCP) -> None:
                 work_item_id=workitem_id,
                 params=retrieve_params(),
             )
+
+        if action == "move":
+            if not target_project_id:
+                return missing(action, "target_project_id")
+            return _move_work_item(workspace_slug, project_id, workitem_id, target_project_id)
 
         if action == "update":
             return client.work_items.update(

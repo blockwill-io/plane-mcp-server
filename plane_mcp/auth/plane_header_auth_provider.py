@@ -47,7 +47,10 @@ class PlaneHeaderAuthProvider(TokenVerifier):
             headers = get_http_headers()
 
             if token:
-                workspace_slug = headers.get("x-workspace-slug")
+                # BlockWill fork: fall back to the server-side default slug —
+                # claude.ai strips custom headers, so x-workspace-slug never
+                # arrives from web/desktop clients.
+                workspace_slug = headers.get("x-workspace-slug") or os.getenv("PLANE_WORKSPACE_SLUG", "")
                 if not workspace_slug:
                     logger.warning("x-api-key header found but x-workspace-slug is missing")
                     return None

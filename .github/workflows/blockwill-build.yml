@@ -1,0 +1,47 @@
+name: BlockWill - Build custom image
+
+# Builds our patched MCP server image on every push to `blockwill`.
+# Deploying to the Azure Container App (ca-plane-mcp in rg-mcp-plane) is a
+# separate one-liner:
+#   az containerapp update -n ca-plane-mcp -g rg-mcp-plane \
+#     --image ghcr.io/blockwill-io/plane-mcp-server:blockwill
+
+on:
+  push:
+    branches:
+      - blockwill
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: Build & push plane-mcp-server
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/blockwill-io/plane-mcp-server:blockwill
+            ghcr.io/blockwill-io/plane-mcp-server:blockwill-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
