@@ -10,8 +10,12 @@ from mcp.types import Icon
 from plane_mcp.auth import PlaneHeaderAuthProvider, PlaneOAuthProvider
 from plane_mcp.instructions import SERVER_INSTRUCTIONS
 from plane_mcp.middleware import CoerceArguments, PlaneLoggingMiddleware, ValidateActionArguments
+from plane_mcp.sdk_patches import apply_sdk_patches
 from plane_mcp.storage import build_token_store
 from plane_mcp.tools import register_tools
+
+# BlockWill fork: fix upstream plane-sdk validation bugs before any tool runs.
+apply_sdk_patches()
 
 # Baseline redirect URIs shipped with the server. Additional patterns can be
 # supplied at runtime via PLANE_OAUTH_ALLOWED_REDIRECT_URIS (comma-separated) so
