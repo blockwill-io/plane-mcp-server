@@ -76,6 +76,15 @@ NEEDS_FIXTURE: set[tuple[str, str]] = {
     ("workitem_attachment", "upload_from_url"),
 }
 
+# Actions that call endpoints which exist only in the BlockWill Plane fork, over
+# raw HTTP rather than the SDK. Covered by tests/tools/test_fork_endpoints.py.
+FORK_ENDPOINTS: set[tuple[str, str]] = {
+    ("workitem", "move"),
+    ("workitem", "list_agent_assigned"),
+    ("workitem", "assign_agent"),
+    ("workitem", "unassign_agent"),
+}
+
 
 def _value(mod_name: str, param: str, annotation: type) -> object:
     sample = SAMPLES.get(param)
@@ -121,6 +130,8 @@ def test_action_reaches_the_sdk(mod, action, registered, spy):
     """A fully-specified action must produce a real, well-typed SDK call."""
     if (mod.NAME, action.name) in NEEDS_FIXTURE:
         pytest.skip("needs populated remote state; covered by test_attachments.py")
+    if (mod.NAME, action.name) in FORK_ENDPOINTS:
+        pytest.skip("fork-only endpoint over raw HTTP; covered by test_fork_endpoints.py")
     tool = registered[mod.NAME]
     result = tool.fn(**_call_args(mod, action, tool))
 

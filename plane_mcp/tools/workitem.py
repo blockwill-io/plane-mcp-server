@@ -129,6 +129,28 @@ ACTIONS = (
         ("add_label_id", "remove_label_id"),
         note="each takes one id or several; the list is merged, not replaced, and removals apply first",
     ),
+    Action(
+        "list_agent_assigned",
+        optional=("agent",),
+        note="every work item in the workspace handed to an agent (default agent: startupos). "
+        "This is StartupOS's queue: only items in this list are StartupOS's to work on. Each "
+        "row carries the item inline (identifier, name, state_group, assignee_ids, ...) so no "
+        "retrieve per row is needed. BlockWill self-host only",
+        read=True,
+    ),
+    Action(
+        "assign_agent",
+        ("project_id", "workitem_id"),
+        ("agent",),
+        note="hand the work item to an agent (default startupos); the human assignees stay the "
+        "owners and the state is untouched. Idempotent. BlockWill self-host only",
+    ),
+    Action(
+        "unassign_agent",
+        ("project_id", "workitem_id"),
+        ("agent",),
+        note="take the work item back from the agent. Idempotent. BlockWill self-host only",
+    ),
 )
 
 GROUP_BY_VALUES = (
@@ -157,7 +179,10 @@ FOOTER = (
     "fields is a sparse fieldset: use `project`, not project_id, and `description_html`, not "
     "description.\n"
     f"count group_by and sub_group_by accept: {', '.join(GROUP_BY_VALUES)}. These are grouping "
-    "keys only -- they are not PQL filter fields, and filtering on state__group is rejected."
+    "keys only -- they are not PQL filter fields, and filtering on state__group is rejected.\n"
+    "Agent assignment is separate from assignees and from state: list_agent_assigned is the "
+    "agent's queue, assign_agent / unassign_agent flip one item. A work item that is not in the "
+    "queue is not the agent's to work on, whatever its state or labels say."
 )
 
 LEGACY = {
@@ -184,12 +209,12 @@ def _scoped_pql(pql: str, project_id: str) -> str:
     return f"({pql}) AND {scope}" if pql else scope
 
 
-def _move_work_item(workspace_slug: str, project_id: str, workitem_id: str, target_project_id: str) -> dict | str:
-    """Call the BlockWill fork's cross-project move endpoint.
+def _fork_request(method: str, path: str, json: dict | None = None) -> dict | str:
+    """Call an endpoint that exists only in the BlockWill Plane fork.
 
-    The endpoint is a fork addition (plane/api/views/move.py in
-    blockwill-io/plane), so it is not part of the Plane SDK — hence the raw
-    HTTP call with the same base URL and credentials the SDK client uses.
+    These endpoints (cross-project move, agent assignment) are fork additions
+    in blockwill-io/plane, so they are not part of the Plane SDK -- hence the
+    raw HTTP call with the same base URL and credentials the SDK client uses.
     """
     import os
 
@@ -207,16 +232,31 @@ def _move_work_item(workspace_slug: str, project_id: str, workitem_id: str, targ
     elif stored:
         headers["Authorization"] = f"Bearer {stored.token}"
     else:
-        return "Error: no Plane credentials available for the move call"
+        return "Error: no Plane credentials available for the call"
 
-    url = (
-        f"{base_url.rstrip('/')}/api/v1/workspaces/{workspace_slug}"
-        f"/projects/{project_id}/work-items/{workitem_id}/move/"
-    )
-    response = httpx.post(url, json={"target_project_id": target_project_id}, headers=headers, timeout=30)
+    url = f"{base_url.rstrip('/')}/api/v1/{path.lstrip('/')}"
+    response = httpx.request(method, url, json=json, headers=headers, timeout=30)
     if response.status_code >= 400:
-        return f"Error: move failed with HTTP {response.status_code}: {response.text[:300]}"
+        return f"Error: {method} {path} failed with HTTP {response.status_code}: {response.text[:300]}"
+    if response.status_code == 204 or not response.content:
+        return {"ok": True}
     return response.json()
+
+
+def _move_work_item(workspace_slug: str, project_id: str, workitem_id: str, target_project_id: str) -> dict | str:
+    """Cross-project move (plane/api/views/move.py in the fork)."""
+    return _fork_request(
+        "POST",
+        f"workspaces/{workspace_slug}/projects/{project_id}/work-items/{workitem_id}/move/",
+        {"target_project_id": target_project_id},
+    )
+
+
+DEFAULT_AGENT = "startupos"
+
+
+def _agent_or_default(agent: str) -> str:
+    return agent or DEFAULT_AGENT
 
 
 def register(mcp: FastMCP) -> None:
@@ -240,6 +280,9 @@ def register(mcp: FastMCP) -> None:
             "archive",
             "manage_assignee",
             "manage_label",
+            "list_agent_assigned",
+            "assign_agent",
+            "unassign_agent",
         ],
         project_id: str = "",
         workitem_id: str = "",
@@ -263,6 +306,7 @@ def register(mcp: FastMCP) -> None:
         state: str = "",
         estimate_point: str = "",
         target_project_id: str = "",
+        agent: str = "",
         add_user_id: str = "",
         remove_user_id: str = "",
         add_label_id: str = "",
@@ -384,6 +428,11 @@ def register(mcp: FastMCP) -> None:
                 params=retrieve_params(),
             )
 
+        if action == "list_agent_assigned":
+            return _fork_request(
+                "GET", f"workspaces/{workspace_slug}/agent-assignments/?agent={_agent_or_default(agent)}"
+            )
+
         if not project_id:
             return missing(action, "project_id")
 
@@ -411,6 +460,13 @@ def register(mcp: FastMCP) -> None:
             if not target_project_id:
                 return missing(action, "target_project_id")
             return _move_work_item(workspace_slug, project_id, workitem_id, target_project_id)
+
+        if action in ("assign_agent", "unassign_agent"):
+            return _fork_request(
+                "POST" if action == "assign_agent" else "DELETE",
+                f"workspaces/{workspace_slug}/projects/{project_id}/work-items/{workitem_id}/agent-assignment/",
+                {"agent": _agent_or_default(agent)},
+            )
 
         if action == "update":
             return client.work_items.update(
