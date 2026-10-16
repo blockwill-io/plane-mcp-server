@@ -12,7 +12,11 @@ HTTP / SSE transports. Priority order (highest first):
    (``AWS_CONTAINER_CREDENTIALS_FULL_URI``) + host/port → Redis with a rotating
    AUTH token from AWS Secrets Manager.
 4. ``REDIS_HOST`` + ``REDIS_PORT`` → plain Redis (no auth).
-5. None of the above → in-memory store (dev only; tokens lost on restart).
+5. ``TOKEN_STORE_DIR`` → encrypted JSON files under that directory (BlockWill
+   fork; e.g. an Azure Files share mounted into the container). Values are
+   Fernet-encrypted with a key derived from ``TOKEN_STORE_ENCRYPTION_KEY``,
+   which is required.
+6. None of the above → in-memory store (dev only; tokens lost on restart).
 
 Misconfigurations raise ``RuntimeError`` at startup. Reachability is verified
 eagerly with a synchronous PING.
@@ -127,6 +131,31 @@ def _ping_redis(
     logger.info("Redis connection verified (PING succeeded)")
 
 
+def build_file_store(directory: str, encryption_key: str) -> Any:
+    """Fernet-encrypted FileTreeStore under ``directory``.
+
+    The OAuth proxy keeps client registrations and upstream Plane tokens here,
+    so values are encrypted at rest; the files on the share are opaque.
+    """
+    if not encryption_key:
+        raise RuntimeError("TOKEN_STORE_DIR is set but TOKEN_STORE_ENCRYPTION_KEY is not — set both.")
+
+    from pathlib import Path
+
+    from key_value.aio.stores.filetree import FileTreeStore
+    from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
+
+    path = Path(directory)
+    path.mkdir(parents=True, exist_ok=True)
+    store = FernetEncryptionWrapper(
+        key_value=FileTreeStore(data_directory=path),
+        source_material=encryption_key,
+        salt="plane-mcp-token-store",
+    )
+    logger.info("Token store: encrypted files (dir=%s)", directory)
+    return store
+
+
 def build_token_store() -> Any:
     """Select and build the OAuth token store from environment variables.
 
@@ -238,8 +267,14 @@ def build_token_store() -> Any:
         logger.info("Token store: Redis (auth=none, host=%s, port=%s)", redis_host, redis_port)
         return store
 
-    # 5. In-memory fallback
+    # 5. Encrypted files (BlockWill fork)
+    store_dir = os.getenv("TOKEN_STORE_DIR")
+    if store_dir:
+        return build_file_store(store_dir, os.getenv("TOKEN_STORE_ENCRYPTION_KEY", ""))
+
+    # 6. In-memory fallback
     logger.warning(
-        "Token store: in-memory (tokens lost on restart). Set REDIS_URL or REDIS_HOST and REDIS_PORT for production."
+        "Token store: in-memory (tokens lost on restart). Set REDIS_URL, REDIS_HOST and REDIS_PORT, "
+        "or TOKEN_STORE_DIR for production."
     )
     return MemoryStore()
