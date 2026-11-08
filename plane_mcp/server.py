@@ -52,7 +52,8 @@ def get_allowed_client_redirect_uris() -> list[str]:
     return allowed
 
 
-LOG_PAYLOADS = os.getenv("LOG_PAYLOADS", "true").lower() == "true"
+# Off unless asked for: payloads carry ticket and comment text into container logs.
+LOG_PAYLOADS = os.getenv("LOG_PAYLOADS", "false").lower() == "true"
 
 
 def _configured(mcp: FastMCP) -> FastMCP:
