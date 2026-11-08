@@ -2,7 +2,8 @@ name: BlockWill - PR checks
 
 # Lint and test every pull request into `blockwill` before it can be merged
 # and picked up by blockwill-build.yml. Python matches the Dockerfile (3.11);
-# dependencies come from uv.lock, so CI tests what the image ships.
+# dependencies come from uv.lock (and must match pyproject), so CI tests what
+# the image ships.
 
 on:
   pull_request:
@@ -34,7 +35,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install
-        run: uv sync --frozen --extra dev
+        run: uv sync --locked --extra dev # fails if uv.lock is out of date
 
       - name: Ruff lint
         run: uv run --frozen ruff check .
