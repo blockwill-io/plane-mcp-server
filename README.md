@@ -156,6 +156,9 @@ Self-hosting the server itself:
 | `PLANE_INTERNAL_BASE_URL` | Internal URL for server-to-server calls, preferred over `PLANE_BASE_URL` |
 | `REDIS_URL` | OAuth token storage as one connection URL (`redis://` or `rediss://` for TLS); wins over host/port |
 | `REDIS_HOST` / `REDIS_PORT` | OAuth token storage; falls back to in-memory |
+| `TOKEN_STORE_DIR` | OAuth token storage as encrypted files in this directory, when no Redis is set |
+| `TOKEN_STORE_ENCRYPTION_KEY` | Required with `TOKEN_STORE_DIR`; at least 32 bytes (`openssl rand -base64 48`) |
+| `TOKEN_STORE_SALT` | Optional per-deployment salt for that key. Changing it, or the key, signs everyone out |
 | `PLANE_OAUTH_PROVIDER_*` | OAuth client credentials and base URL |
 | `MCP_PATH_PREFIX` | Path prefix for the HTTP routes, when mounted behind a proxy — `/plane` serves `/plane/http/mcp` |
 

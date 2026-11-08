@@ -131,6 +131,9 @@ Integration tests in `tests/test_integration.py` use `FastMCP.Client` with `Stre
 | `PLANE_INTERNAL_BASE_URL` | http/sse (optional) | Internal URL for server-to-server calls |
 | `REDIS_URL` | http/sse (optional) | Token storage as one connection URL (`redis://`/`rediss://`); wins over host/port |
 | `REDIS_HOST` / `REDIS_PORT` | http/sse (optional) | Token storage (falls back to in-memory) |
+| `TOKEN_STORE_DIR` | http/sse (optional) | Token storage as encrypted files, when no Redis is set |
+| `TOKEN_STORE_ENCRYPTION_KEY` | with `TOKEN_STORE_DIR` | At least 32 bytes; startup fails otherwise |
+| `TOKEN_STORE_SALT` | with `TOKEN_STORE_DIR` (optional) | Per-deployment KDF salt; default is the original fixed one. Changing it, or the key, signs everyone out |
 | `PLANE_OAUTH_PROVIDER_*` | http/sse OAuth | OAuth client credentials and base URL |
 | `PLANE_OAUTH_ALLOWED_REDIRECT_URIS` | http/sse OAuth (optional) | Comma-separated redirect URI patterns appended to the built-in allowlist (onboard clients without a release) |
 | `LOG_USER_INFO` | all (optional, default: false) | When `true`, include user info (PII such as display name) in logs alongside the opaque user id |
