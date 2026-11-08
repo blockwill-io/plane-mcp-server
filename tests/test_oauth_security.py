@@ -90,8 +90,12 @@ class TestOAuthRedirectAttack:
     the proxy will redirect to after the upstream callback completes.
     """
 
-    def _register_client(self, client: TestClient, redirect_uri: str) -> dict:
-        """Register an OAuth client with the given redirect_uri."""
+    def _register_client(self, client: TestClient, redirect_uri: str) -> dict | None:
+        """Register an OAuth client with the given redirect_uri.
+
+        Returns None when registration itself refuses the URI (FastMCP >= 3.4
+        checks the allowlist there), the earliest point the attack can stop.
+        """
         response = client.post(
             "/register",
             json={
@@ -101,6 +105,8 @@ class TestOAuthRedirectAttack:
                 "token_endpoint_auth_method": "client_secret_post",
             },
         )
+        if response.status_code == 400 and response.json().get("error") == "invalid_redirect_uri":
+            return None
         assert response.status_code == 201, f"Registration failed: {response.text}"
         data = response.json()
         assert "client_id" in data
@@ -117,6 +123,8 @@ class TestOAuthRedirectAttack:
 
         # Step 1: Attacker registers malicious client
         reg = self._register_client(client, attacker_uri)
+        if reg is None:
+            return  # refused at registration
 
         # Step 2: Attacker crafts authorization URL for victim
         response = client.get(
@@ -162,6 +170,8 @@ class TestOAuthRedirectAttack:
     def test_malicious_uris_never_appear_in_redirects(self, client: TestClient, malicious_uri: str) -> None:
         """Verify various attack vectors never leak into redirect locations."""
         reg = self._register_client(client, malicious_uri)
+        if reg is None:
+            return  # refused at registration
 
         response = client.get(
             "/authorize",
@@ -186,6 +196,7 @@ class TestOAuthRedirectAttack:
         legitimate_uri = "http://localhost:3000/callback"
 
         reg = self._register_client(client, legitimate_uri)
+        assert reg is not None, "a legitimate redirect URI was refused at registration"
 
         response = client.get(
             "/authorize",
