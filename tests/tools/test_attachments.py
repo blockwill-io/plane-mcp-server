@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 from fastmcp.utilities.types import Image
 
+from plane_mcp.attachments import Fetched, ResponseTooLarge
 from plane_mcp.tools import workitem_attachment as module
 
 PROJECT = "project-1"
@@ -22,13 +23,15 @@ ATTACHMENT = "attachment-1"
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
 
 
-class _Response:
-    def __init__(self, content: bytes, headers: dict[str, str] | None = None) -> None:
-        self.content = content
-        self.headers = headers or {}
+def _fetch(payload: bytes, content_type: str):
+    """Stands in for fetch_public, which has its own tests (tests/test_fetch_public.py)."""
 
-    def raise_for_status(self) -> None:
-        return None
+    def fetch(url: str, limit: int, **_):
+        if len(payload) > limit:
+            raise ResponseTooLarge(limit)
+        return Fetched(payload, {"Content-Type": content_type}, url)
+
+    return fetch
 
 
 def _attachment(name: str, content_type: str):
@@ -43,7 +46,7 @@ def attachment_tool(registered, spy, monkeypatch):
 
     def stub(name: str, content_type: str, payload: bytes = PNG):
         spy.returns["work_items.attachments.list"] = [_attachment(name, content_type)]
-        monkeypatch.setattr(module.requests, "get", lambda *a, **k: _Response(payload, {"Content-Type": content_type}))
+        monkeypatch.setattr(module, "fetch_public", _fetch(payload, content_type))
 
     return registered["workitem_attachment"].fn, spy, stub
 
@@ -112,7 +115,7 @@ def test_upload_from_url_rejects_a_private_address(attachment_tool):
 
 def test_upload_from_url_sends_the_fetched_bytes(attachment_tool, monkeypatch):
     tool, spy, _ = attachment_tool
-    monkeypatch.setattr(module.requests, "get", lambda *a, **k: _Response(PNG, {"Content-Type": "image/png"}))
+    monkeypatch.setattr(module, "fetch_public", _fetch(PNG, "image/png"))
     monkeypatch.setattr(module, "attachment_to_dict", lambda attachment, slug: {"id": ATTACHMENT})
 
     result = tool(
