@@ -372,3 +372,15 @@ class PlaneOAuthProvider(OAuthProxy):
             settings.client_id,
             required_scopes_final,
         )
+
+    async def get_client(self, client_id: str):
+        """A registered client, held to the redirect allowlist configured now.
+
+        FastMCP copies the allowlist into each client record when it registers,
+        so without this a narrower allowlist would reach only clients that
+        register after it ships.
+        """
+        client = await super().get_client(client_id)
+        if client is not None and hasattr(client, "allowed_redirect_uri_patterns"):
+            client.allowed_redirect_uri_patterns = self._allowed_client_redirect_uris
+        return client

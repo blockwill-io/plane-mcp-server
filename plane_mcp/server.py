@@ -26,14 +26,19 @@ DEFAULT_ALLOWED_REDIRECT_URIS = [
     "http://localhost:*/*",
     "http://127.0.0.1:*",
     "http://127.0.0.1:*/*",
-    # Known MCP client custom protocol schemes
-    "cursor://anysphere.cursor-mcp/oauth/*",
-    "https://www.cursor.com/*",
+    # Exact callbacks of known clients. No path wildcards on shared hosts: any
+    # page on the host that can be made to forward a URL would receive the code.
+    # Cursor registers all three of its callbacks together (the third is
+    # http://localhost:8787/callback, covered above).
+    "cursor://anysphere.cursor-mcp/oauth/callback",
+    "https://www.cursor.com/agents/mcp/oauth/callback",
     "https://vscode.dev/redirect",
     "https://insiders.vscode.dev/redirect",
     "https://antigravity.google/oauth-callback",
-    # Claude.ai web client
-    "https://claude.ai/*",
+    # Claude.ai, Claude Desktop, mobile and Cowork. Anthropic asks servers to
+    # allow the claude.com form too, ahead of a move. Claude Code uses localhost.
+    "https://claude.ai/api/mcp/auth_callback",
+    "https://claude.com/api/mcp/auth_callback",
     # ChatGPT connectors — per-connector callback + legacy redirect
     "https://chatgpt.com/connector/oauth/*",
     "https://chatgpt.com/connector_platform_oauth_redirect",
