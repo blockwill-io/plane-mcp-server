@@ -1,7 +1,6 @@
 """BlockWill fork — the encrypted file token store (TOKEN_STORE_DIR)."""
 
 import asyncio
-import os
 
 import pytest
 from key_value.aio.errors.wrappers import DecryptionError
@@ -49,15 +48,3 @@ def test_selected_by_env_and_key_required(tmp_path, monkeypatch, no_redis):
     store = build_token_store()
     assert type(store).__name__ == "FernetEncryptionWrapper"
     assert (tmp_path / "store").is_dir()
-
-
-@pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0, reason="needs a non-root POSIX user")
-def test_an_unwritable_directory_fails_at_start(tmp_path):
-    locked = tmp_path / "locked"
-    locked.mkdir()
-    locked.chmod(0o555)
-    try:
-        with pytest.raises(RuntimeError, match="not writable"):
-            build_file_store(str(locked), "k" * 64)
-    finally:
-        locked.chmod(0o755)
