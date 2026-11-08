@@ -1,0 +1,48 @@
+name: BlockWill - PR checks
+
+# Lint and test every pull request into `blockwill` before it can be merged
+# and picked up by blockwill-build.yml. Python matches the Dockerfile (3.11);
+# dependencies come from uv.lock, so CI tests what the image ships.
+
+on:
+  pull_request:
+    branches:
+      - blockwill
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Lint & test
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "0.9.18" # mise.toml
+          python-version: "3.11"
+
+      - name: Install
+        run: uv sync --frozen --extra dev
+
+      - name: Ruff lint
+        run: uv run --frozen ruff check .
+
+      - name: Ruff format
+        run: uv run --frozen ruff format --check .
+
+      # tests/test_integration.py needs a live Plane and skips itself without
+      # one; everything else runs offline.
+      - name: Pytest
+        run: uv run --frozen pytest -q
