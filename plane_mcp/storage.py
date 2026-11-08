@@ -147,6 +147,14 @@ def build_file_store(directory: str, encryption_key: str) -> Any:
 
     path = Path(directory)
     path.mkdir(parents=True, exist_ok=True)
+    # Fail at start rather than at the first sign-in when this process cannot
+    # write here, e.g. a share mounted for root while the container runs as a user.
+    probe = path / f".write-check-{os.getpid()}"
+    try:
+        probe.write_bytes(b"")
+        probe.unlink()
+    except OSError as exc:
+        raise RuntimeError(f"TOKEN_STORE_DIR {directory!r} is not writable by this process: {exc}") from exc
     store = FernetEncryptionWrapper(
         key_value=FileTreeStore(data_directory=path),
         source_material=encryption_key,
