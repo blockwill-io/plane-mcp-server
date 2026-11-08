@@ -13,16 +13,17 @@ RUN apt-get update && apt-get install -y \
 # uv, same version as mise.toml
 COPY --from=ghcr.io/astral-sh/uv:0.9.18@sha256:5713fa8217f92b80223bc83aac7db36ec80a84437dbc0d04bbc659cae030d8c9 /uv /usr/local/bin/uv
 
-# Install exactly what uv.lock pins (--frozen fails rather than re-resolving),
+# Install exactly what uv.lock pins (--locked also fails if it is out of date
+# with pyproject.toml),
 # into /app/.venv with the image's own Python.
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never \
     UV_NO_CACHE=1
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --frozen --no-dev --no-install-project
+RUN uv sync --locked --no-dev --no-install-project
 COPY plane_mcp/ ./plane_mcp/
-RUN uv sync --frozen --no-dev --no-editable
+RUN uv sync --locked --no-dev --no-editable
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Run unprivileged. The code and venv stay root-owned, so the process cannot
