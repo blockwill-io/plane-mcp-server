@@ -7,7 +7,9 @@ merging them teaches the model to filter on a field the API rejects.
 
 from __future__ import annotations
 
+import uuid
 from typing import Annotated, Any, Literal, get_args
+from urllib.parse import quote
 
 from fastmcp import FastMCP
 from fastmcp.utilities.logging import get_logger
@@ -224,13 +226,16 @@ def _fork_request(method: str, path: str, json: dict | None = None) -> dict | st
     base_url = os.getenv("PLANE_INTERNAL_BASE_URL") or os.getenv("PLANE_BASE_URL", "https://api.plane.so")
     headers = {"Content-Type": "application/json"}
 
+    # Same choice as plane_mcp/client.py: the caller's own credential whenever
+    # the request carries one; PLANE_API_KEY only without one (stdio mode).
     stored = get_access_token()
-    if stored and stored.claims.get("auth_method") in ("api_key_env", "api_key_header"):
-        headers["x-api-key"] = stored.token
+    if stored:
+        if stored.claims.get("auth_method", "oauth") in ("api_key_env", "api_key_header"):
+            headers["x-api-key"] = stored.token
+        else:
+            headers["Authorization"] = f"Bearer {stored.token}"
     elif os.getenv("PLANE_API_KEY"):
         headers["x-api-key"] = os.environ["PLANE_API_KEY"]
-    elif stored:
-        headers["Authorization"] = f"Bearer {stored.token}"
     else:
         return "Error: no Plane credentials available for the call"
 
@@ -241,6 +246,21 @@ def _fork_request(method: str, path: str, json: dict | None = None) -> dict | st
     if response.status_code == 204 or not response.content:
         return {"ok": True}
     return response.json()
+
+
+def _uuids(**ids: str) -> dict[str, str] | str:
+    """The ids in canonical UUID form, or an error naming the first that is not one.
+
+    Fork endpoints take these ids in the URL path, so anything else is refused
+    rather than passed through.
+    """
+    canonical = {}
+    for key, value in ids.items():
+        try:
+            canonical[key] = str(uuid.UUID(value))
+        except ValueError:
+            return f"Error: {key} must be a UUID, got {value!r}"
+    return canonical
 
 
 def _move_work_item(workspace_slug: str, project_id: str, workitem_id: str, target_project_id: str) -> dict | str:
@@ -429,9 +449,8 @@ def register(mcp: FastMCP) -> None:
             )
 
         if action == "list_agent_assigned":
-            return _fork_request(
-                "GET", f"workspaces/{workspace_slug}/agent-assignments/?agent={_agent_or_default(agent)}"
-            )
+            agent_param = quote(_agent_or_default(agent), safe="")
+            return _fork_request("GET", f"workspaces/{workspace_slug}/agent-assignments/?agent={agent_param}")
 
         if not project_id:
             return missing(action, "project_id")
@@ -459,12 +478,19 @@ def register(mcp: FastMCP) -> None:
         if action == "move":
             if not target_project_id:
                 return missing(action, "target_project_id")
-            return _move_work_item(workspace_slug, project_id, workitem_id, target_project_id)
+            ids = _uuids(project_id=project_id, workitem_id=workitem_id, target_project_id=target_project_id)
+            if isinstance(ids, str):
+                return ids
+            return _move_work_item(workspace_slug, **ids)
 
         if action in ("assign_agent", "unassign_agent"):
+            ids = _uuids(project_id=project_id, workitem_id=workitem_id)
+            if isinstance(ids, str):
+                return ids
             return _fork_request(
                 "POST" if action == "assign_agent" else "DELETE",
-                f"workspaces/{workspace_slug}/projects/{project_id}/work-items/{workitem_id}/agent-assignment/",
+                f"workspaces/{workspace_slug}/projects/{ids['project_id']}/work-items/{ids['workitem_id']}"
+                "/agent-assignment/",
                 {"agent": _agent_or_default(agent)},
             )
 
