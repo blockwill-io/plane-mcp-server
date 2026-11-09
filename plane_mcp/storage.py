@@ -15,7 +15,8 @@ HTTP / SSE transports. Priority order (highest first):
 5. ``TOKEN_STORE_DIR`` → encrypted JSON files under that directory (BlockWill
    fork; e.g. an Azure Files share mounted into the container). Values are
    Fernet-encrypted with a key derived from ``TOKEN_STORE_ENCRYPTION_KEY``,
-   which is required.
+   which is required and must be at least 32 bytes, and the optional
+   ``TOKEN_STORE_SALT``.
 6. None of the above → in-memory store (dev only; tokens lost on restart).
 
 Misconfigurations raise ``RuntimeError`` at startup. Reachability is verified
@@ -131,7 +132,17 @@ def _ping_redis(
     logger.info("Redis connection verified (PING succeeded)")
 
 
-def build_file_store(directory: str, encryption_key: str) -> Any:
+# The key is stretched with PBKDF2, but stretching cannot add entropy, so the
+# key itself must carry it: at least 32 bytes, e.g. `openssl rand -base64 48`.
+MIN_ENCRYPTION_KEY_BYTES = 32
+
+# The salt every existing deployment encrypted with. TOKEN_STORE_SALT may set a
+# per-deployment one, but changing it -- like changing the key -- makes every
+# stored token unreadable, which signs everyone out.
+DEFAULT_TOKEN_STORE_SALT = "plane-mcp-token-store"
+
+
+def build_file_store(directory: str, encryption_key: str, salt: str = DEFAULT_TOKEN_STORE_SALT) -> Any:
     """Fernet-encrypted FileTreeStore under ``directory``.
 
     The OAuth proxy keeps client registrations and upstream Plane tokens here,
@@ -139,6 +150,11 @@ def build_file_store(directory: str, encryption_key: str) -> Any:
     """
     if not encryption_key:
         raise RuntimeError("TOKEN_STORE_DIR is set but TOKEN_STORE_ENCRYPTION_KEY is not — set both.")
+    if len(encryption_key.encode()) < MIN_ENCRYPTION_KEY_BYTES:
+        raise RuntimeError(
+            f"TOKEN_STORE_ENCRYPTION_KEY is too short: it must be at least {MIN_ENCRYPTION_KEY_BYTES} bytes "
+            "(generate one with `openssl rand -base64 48`)."
+        )
 
     from pathlib import Path
 
@@ -150,7 +166,7 @@ def build_file_store(directory: str, encryption_key: str) -> Any:
     store = FernetEncryptionWrapper(
         key_value=FileTreeStore(data_directory=path),
         source_material=encryption_key,
-        salt="plane-mcp-token-store",
+        salt=salt,
     )
     logger.info("Token store: encrypted files (dir=%s)", directory)
     return store
@@ -270,7 +286,11 @@ def build_token_store() -> Any:
     # 5. Encrypted files (BlockWill fork)
     store_dir = os.getenv("TOKEN_STORE_DIR")
     if store_dir:
-        return build_file_store(store_dir, os.getenv("TOKEN_STORE_ENCRYPTION_KEY", ""))
+        return build_file_store(
+            store_dir,
+            os.getenv("TOKEN_STORE_ENCRYPTION_KEY", ""),
+            os.getenv("TOKEN_STORE_SALT") or DEFAULT_TOKEN_STORE_SALT,
+        )
 
     # 6. In-memory fallback
     logger.warning(
