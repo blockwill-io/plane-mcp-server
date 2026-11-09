@@ -26,6 +26,7 @@ eagerly with a synchronous PING.
 from __future__ import annotations
 
 import os
+import tempfile
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
@@ -163,6 +164,13 @@ def build_file_store(directory: str, encryption_key: str, salt: str = DEFAULT_TO
 
     path = Path(directory)
     path.mkdir(parents=True, exist_ok=True)
+    # Fail at start rather than at the first sign-in when this process cannot
+    # write here, e.g. a share mounted for root while the container runs as a user.
+    try:
+        with tempfile.NamedTemporaryFile(dir=path, prefix=".write-check-"):
+            pass
+    except OSError as exc:
+        raise RuntimeError(f"TOKEN_STORE_DIR {directory!r} is not writable by this process: {exc}") from exc
     store = FernetEncryptionWrapper(
         key_value=FileTreeStore(data_directory=path),
         source_material=encryption_key,
