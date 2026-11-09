@@ -14,6 +14,7 @@ security fix blocks the corresponding step.
 
 import pytest
 from fastmcp import FastMCP
+from fastmcp.server.auth.redirect_validation import validate_redirect_uri
 from key_value.aio.stores.memory import MemoryStore
 from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
@@ -22,19 +23,8 @@ from starlette.testclient import TestClient
 
 from plane_mcp.auth import PlaneOAuthProvider
 
-# Exact allowed patterns from plane_mcp/server.py
-ALLOWED_REDIRECT_URI_PATTERNS = [
-    "http://localhost:*",
-    "http://localhost:*/*",
-    "http://127.0.0.1:*",
-    "http://127.0.0.1:*/*",
-    "cursor://anysphere.cursor-mcp/oauth/*",
-    "https://www.cursor.com/*",
-    "https://vscode.dev/redirect",
-    "https://insiders.vscode.dev/redirect",
-    "https://antigravity.google/oauth-callback",
-    "https://claude.ai/*",
-]
+# The real allowlist, not a copy, so the tests follow the server.
+from plane_mcp.server import DEFAULT_ALLOWED_REDIRECT_URIS as ALLOWED_REDIRECT_URI_PATTERNS
 
 
 @pytest.fixture(scope="module")
@@ -226,3 +216,71 @@ class TestOAuthRedirectAttack:
         # Wildcard origin is fine without credentials
         # (browsers enforce that * + credentials:true is invalid, so this combo is safe)
         assert response.headers.get("access-control-allow-origin") == "*"
+
+
+class TestRedirectAllowlist:
+    """Each known client's real callback is allowed; nothing else on its host is."""
+
+    @pytest.mark.parametrize(
+        "uri",
+        [
+            "https://claude.ai/api/mcp/auth_callback",
+            "https://claude.com/api/mcp/auth_callback",
+            "http://localhost:3118/callback",  # Claude Code
+            "http://127.0.0.1:3118/callback",
+            "cursor://anysphere.cursor-mcp/oauth/callback",
+            "https://www.cursor.com/agents/mcp/oauth/callback",
+            "http://localhost:8787/callback",  # Cursor
+            "https://vscode.dev/redirect",
+        ],
+    )
+    def test_real_client_callbacks_are_allowed(self, uri: str) -> None:
+        assert validate_redirect_uri(uri, ALLOWED_REDIRECT_URI_PATTERNS)
+
+    @pytest.mark.parametrize(
+        "uri",
+        [
+            "https://claude.ai/",
+            "https://claude.ai/some/other/page",
+            "https://claude.ai/api/mcp/auth_callback/extra",
+            "https://www.cursor.com/",
+            "https://www.cursor.com/redirect?to=https://attacker.example",
+            "cursor://anysphere.cursor-mcp/oauth/other",
+            "https://evil.claude.ai.attacker.example/api/mcp/auth_callback",
+        ],
+    )
+    def test_other_paths_on_those_hosts_are_refused(self, uri: str) -> None:
+        assert not validate_redirect_uri(uri, ALLOWED_REDIRECT_URI_PATTERNS)
+
+    def test_a_client_registered_under_an_older_allowlist_gets_the_current_one(self) -> None:
+        """FastMCP stores the allowlist per client; ours must not keep a stale, wider one."""
+        import asyncio
+
+        from fastmcp.server.auth.oauth_proxy.models import ProxyDCRClient
+        from mcp.shared.auth import InvalidRedirectUriError
+        from pydantic import AnyUrl
+
+        provider = PlaneOAuthProvider(
+            client_id="test-client-id",
+            client_secret="test-client-secret",
+            base_url="http://localhost:8211",
+            plane_base_url="http://localhost:9999",
+            client_storage=MemoryStore(),
+            allowed_client_redirect_uris=ALLOWED_REDIRECT_URI_PATTERNS,
+        )
+        stale = ProxyDCRClient(
+            client_id="old-client",
+            client_secret=None,
+            redirect_uris=[AnyUrl("https://claude.ai/some/other/page")],
+            token_endpoint_auth_method="none",
+            allowed_redirect_uri_patterns=["https://claude.ai/*"],
+        )
+
+        async def scenario():
+            await provider._client_store.put(key="old-client", value=stale)
+            return await provider.get_client("old-client")
+
+        client = asyncio.run(scenario())
+        with pytest.raises(InvalidRedirectUriError):
+            client.validate_redirect_uri(AnyUrl("https://claude.ai/some/other/page"))
+        assert client.validate_redirect_uri(AnyUrl("https://claude.ai/api/mcp/auth_callback"))
