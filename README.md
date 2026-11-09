@@ -184,7 +184,7 @@ available — an opaque user id and the workspace slug.
 
 ```bash
 export LOG_USER_INFO=false    # also log the display name (PII);
-export LOG_PAYLOADS=false    # keep request payloads out of logs; default true
+export LOG_PAYLOADS=true     # also log request payloads (ticket text); default false
 ```
 
 Only the OAuth and PAT transports carry a display name; stdio is unaffected.
