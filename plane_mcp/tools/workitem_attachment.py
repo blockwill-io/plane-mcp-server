@@ -24,8 +24,9 @@ from plane_mcp.attachments import (
     READABLE_TEXT_TYPES,
     TEXT_READ_LIMIT,
     UPLOAD_SIZE_LIMIT,
-    assert_public_url,
+    ResponseTooLarge,
     attachment_to_dict,
+    fetch_public,
 )
 from plane_mcp.client import get_plane_client_context
 from plane_mcp.toolkit import Action, build_annotations, build_description, missing, needs
@@ -106,19 +107,15 @@ def _read(client, workspace_slug: str, project_id: str, workitem_id: str, attach
         )
 
     url = _download_url(client, workspace_slug, project_id, workitem_id, attachment_id)
+    limit = IMAGE_READ_LIMIT if is_image else TEXT_READ_LIMIT
     try:
-        response = requests.get(url, timeout=HTTP_TIMEOUT)
-        response.raise_for_status()
+        payload = fetch_public(url, limit, timeout=HTTP_TIMEOUT).content
+    except ResponseTooLarge as exc:
+        raise ValueError(
+            f"{name!r} exceeds the {limit // 1024 // 1024} MB limit. Use the download_url action instead."
+        ) from exc
     except requests.RequestException as exc:
         raise ValueError(f"Failed to fetch attachment content: {exc}") from exc
-
-    payload = response.content
-    limit = IMAGE_READ_LIMIT if is_image else TEXT_READ_LIMIT
-    if len(payload) > limit:
-        raise ValueError(
-            f"{name!r} is {len(payload) / 1024 / 1024:.1f} MB, which exceeds the "
-            f"{limit // 1024 // 1024} MB limit. Use the download_url action instead."
-        )
     if is_image:
         # FastMCP Image(format=X) sets the MIME type to "image/X", so strip the prefix.
         return Image(data=payload, format=content_type.removeprefix("image/"))
@@ -126,24 +123,18 @@ def _read(client, workspace_slug: str, project_id: str, workitem_id: str, attach
 
 
 def _upload(client, workspace_slug: str, project_id: str, workitem_id: str, url: str, name: str):
-    assert_public_url(url)
     try:
-        response = requests.get(url, timeout=HTTP_TIMEOUT)
-        response.raise_for_status()
+        fetched = fetch_public(url, UPLOAD_SIZE_LIMIT, timeout=HTTP_TIMEOUT)
+    except ResponseTooLarge as exc:
+        raise ValueError(
+            f"File at {url!r} is too large. Maximum allowed size is {UPLOAD_SIZE_LIMIT // 1024 // 1024} MB."
+        ) from exc
     except requests.RequestException as exc:
         raise ValueError(f"Failed to fetch file from {url!r}: {exc}") from exc
 
-    declared = response.headers.get("Content-Length")
-    payload = response.content
-    size = max(int(declared) if declared else 0, len(payload))
-    if size > UPLOAD_SIZE_LIMIT:
-        raise ValueError(
-            f"File at {url!r} is too large ({size // 1024 // 1024} MB). Maximum allowed "
-            f"size is {UPLOAD_SIZE_LIMIT // 1024 // 1024} MB."
-        )
-
+    payload = fetched.content
     filename = name or os.path.basename(urlparse(url).path.rstrip("/")) or "attachment"
-    raw_type = response.headers.get("Content-Type", "")
+    raw_type = fetched.headers.get("Content-Type", "")
     content_type = raw_type.split(";")[0].strip() if raw_type else ""
     if not content_type or content_type == "application/octet-stream":
         content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
