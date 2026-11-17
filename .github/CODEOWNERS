@@ -1,0 +1,10 @@
+# Changes to how the BlockWill build of the Plane MCP server is checked, built and shipped need a
+# review from the owner below. Branch protection decides whether that review is required
+# ("Require review from Code Owners"); this file only says who it is.
+/.github/          @bhavyagosai
+/Dockerfile        @bhavyagosai
+/.dockerignore     @bhavyagosai
+/pyproject.toml    @bhavyagosai
+/uv.lock           @bhavyagosai
+/osv-scanner.toml  @bhavyagosai
+/.gitleaks.toml    @bhavyagosai

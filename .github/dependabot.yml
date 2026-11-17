@@ -1,0 +1,55 @@
+# Weekly dependency updates, as pull requests into blockwill (they go through the PR checks like
+# any change, and reach production only when blockwill-build.yml builds and someone deploys).
+# Minor and patch updates of one ecosystem arrive as one grouped pull request; a major update gets
+# a pull request of its own. Security fixes are not delayed by the schedule: Dependabot security
+# updates open as soon as an advisory is published.
+version: 2
+updates:
+  # pyproject.toml and uv.lock (the image installs exactly what uv.lock pins).
+  - package-ecosystem: uv
+    directory: /
+    target-branch: blockwill
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Dubai
+    open-pull-requests-limit: 5
+    groups:
+      uv-minor-and-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: "build(deps)"
+
+  # Actions in the workflows. Dependabot moves a sha pin and its version comment together.
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: blockwill
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Dubai
+    open-pull-requests-limit: 5
+    groups:
+      actions-minor-and-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: "ci"
+
+  # The Dockerfile's base images, pinned by digest. A new Python line (3.11 to 3.12) is a
+  # deliberate change: CI and mise.toml move with it.
+  - package-ecosystem: docker
+    directory: /
+    target-branch: blockwill
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Dubai
+    open-pull-requests-limit: 2
+    ignore:
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+    commit-message:
+      prefix: "build"

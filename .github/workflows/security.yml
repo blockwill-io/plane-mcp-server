@@ -1,0 +1,94 @@
+name: Security
+
+# Known-vulnerable dependencies, committed secrets and risky code, with free tools only. Kept
+# apart from blockwill-pr-checks.yml and blockwill-build.yml so either can change without
+# touching this.
+# Read-only, on the org's Azure runners: every tool is a pinned download checked against its
+# published checksum, or a pinned pip install in its own venv.
+#
+# - audit: osv-scanner over uv.lock (what the image installs with uv sync --locked), failing on
+#   any known vulnerability: osv-scanner has no severity threshold, which makes it stricter than
+#   "high". Accepted advisories live in osv-scanner.toml, each with a reason.
+# - gitleaks: a pull request's own commits; on a push, all history. Exceptions live in
+#   .gitleaks.toml, each with a reason; a real secret is rotated, never allowed.
+# - semgrep: Semgrep CE with the registry's default, secrets and GitHub Actions rules; fails on
+#   any ERROR finding. An exception is a `nosemgrep` comment with a reason.
+on:
+  pull_request:
+    branches: [blockwill]
+  push:
+    branches: [blockwill]
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: blockwill-azure
+    timeout-minutes: 10
+    env:
+      OSV_SCANNER_VERSION: 2.7.1
+      OSV_SCANNER_SHA256: fb7dab19a8bd9bbe5c3189f09d4b7ee1820c9553a23bac202648a56efd2f6ee8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: osv-scanner (uv.lock)
+        run: |
+          set -euo pipefail
+          bin="$RUNNER_TEMP/osv-scanner"
+          curl -sSfL -o "$bin" "https://github.com/google/osv-scanner/releases/download/v$OSV_SCANNER_VERSION/osv-scanner_linux_amd64"
+          echo "$OSV_SCANNER_SHA256  $bin" | sha256sum -c --quiet
+          chmod +x "$bin"
+          "$bin" scan source --config osv-scanner.toml -L uv.lock
+
+  gitleaks:
+    runs-on: blockwill-azure
+    timeout-minutes: 10
+    env:
+      GITLEAKS_VERSION: 8.30.1
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: gitleaks
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/gitleaks" && mkdir -p "$dir"
+          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL -o "$dir/$tarball" "https://github.com/gitleaks/gitleaks/releases/download/v$GITLEAKS_VERSION/$tarball"
+          echo "$GITLEAKS_SHA256  $dir/$tarball" | sha256sum -c --quiet
+          tar -xzf "$dir/$tarball" -C "$dir" gitleaks
+          scope=()
+          [ -z "$BASE_SHA" ] || scope=(--log-opts="$BASE_SHA..HEAD")
+          "$dir/gitleaks" git --no-banner --redact --config .gitleaks.toml "${scope[@]}" .
+
+  semgrep:
+    runs-on: blockwill-azure
+    timeout-minutes: 15
+    env:
+      SEMGREP_VERSION: 1.185.0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The runners' system Python has no venv module; setup-python's build has one.
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: semgrep
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/semgrep"
+          "$RUNNER_TEMP/semgrep/bin/pip" install --quiet --disable-pip-version-check "semgrep==$SEMGREP_VERSION"
+          # .gitleaks.toml lists the public value gitleaks may ignore.
+          "$RUNNER_TEMP/semgrep/bin/semgrep" scan --metrics=off --error --severity ERROR \
+            --config p/default --config p/github-actions --config p/secrets --exclude .gitleaks.toml

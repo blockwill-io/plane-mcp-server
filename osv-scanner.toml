@@ -1,0 +1,12 @@
+# osv-scanner (.github/workflows/security.yml): advisories accepted for now, each with its reason.
+# Remove an entry as soon as it no longer applies.
+
+# dnspython 2.8.0 is locked only for Python 3.10 (marker python_full_version < '3.11'), because
+# 2.9 needs 3.11. The image and CI run Python 3.11 and install dnspython 2.9.2, which fixes both.
+[[IgnoredVulns]]
+id = "GHSA-45c3-73f7-pv4m"
+reason = "dnspython 2.8.0 is locked only for Python 3.10; the image runs 3.11 with dnspython 2.9.2"
+
+[[IgnoredVulns]]
+id = "GHSA-vvf4-9x63-8xvv"
+reason = "dnspython 2.8.0 is locked only for Python 3.10; the image runs 3.11 with dnspython 2.9.2"
