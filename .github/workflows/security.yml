@@ -3,8 +3,9 @@ name: Security
 # Known-vulnerable dependencies, committed secrets and risky code, with free tools only. Kept
 # apart from blockwill-pr-checks.yml and blockwill-build.yml so either can change without
 # touching this.
-# Read-only, on the org's Azure runners: every tool is a pinned download checked against its
-# published checksum, or a pinned pip install in its own venv.
+# Read-only, on GitHub-hosted runners: this repository is public, so it may not use the org's
+# self-hosted runners (and hosted minutes are free for it). Every tool is a pinned download
+# checked against its published checksum, or a pinned pip install in its own venv.
 #
 # - audit: osv-scanner over uv.lock (what the image installs with uv sync --locked), failing on
 #   any known vulnerability: osv-scanner has no severity threshold, which makes it stricter than
@@ -28,7 +29,7 @@ permissions:
 
 jobs:
   audit:
-    runs-on: blockwill-azure
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       OSV_SCANNER_VERSION: 2.7.1
@@ -47,7 +48,7 @@ jobs:
           "$bin" scan source --config osv-scanner.toml -L uv.lock
 
   gitleaks:
-    runs-on: blockwill-azure
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       GITLEAKS_VERSION: 8.30.1
@@ -72,7 +73,7 @@ jobs:
           "$dir/gitleaks" git --no-banner --redact --config .gitleaks.toml "${scope[@]}" .
 
   semgrep:
-    runs-on: blockwill-azure
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
       SEMGREP_VERSION: 1.185.0
@@ -80,7 +81,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # The runners' system Python has no venv module; setup-python's build has one.
+      # A pinned Python for the semgrep venv.
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
