@@ -1,0 +1,14 @@
+# Secret scanning in CI (.github/workflows/security.yml): gitleaks' own rules, plus the values
+# below that look like secrets but are not. Add a value here only with a reason; a real secret is
+# removed and rotated, never allowed.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Public values that match a secret rule"
+regexTarget = "secret"
+regexes = [
+  # tests/test_wellknown.py on feat/openai-submission: OpenAI's app-directory domain-verification
+  # challenge. It is served to anyone at /.well-known by design, so it proves nothing secret.
+  '''^41YeOptxH4mEJr3dGUJC-LuzUKvtqyDlSuMI172A3wQ$''',
+]
